@@ -1,0 +1,804 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<title>Antumalen Delivery Temuco</title>
+
+<link rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+}
+
+#map{
+    width:100%;
+    height:100vh;
+}
+
+.panel{
+    position:absolute;
+    top:10px;
+    left:10px;
+    z-index:9999;
+    width:360px;
+    background:white;
+    padding:20px;
+    border-radius:18px;
+    box-shadow:0 4px 15px rgba(0,0,0,.25);
+    transition:.3s ease;
+}
+
+.panel.minimizado{
+    width:65px;
+    height:65px;
+    overflow:hidden;
+    padding:10px;
+}
+
+.toggle-panel{
+    position:absolute;
+    top:10px;
+    right:10px;
+    width:42px;
+    height:42px;
+    border:none;
+    border-radius:12px;
+    background:#ff7a00;
+    color:white;
+    font-size:22px;
+    cursor:pointer;
+}
+
+.logo{
+    text-align:center;
+    margin-bottom:15px;
+}
+
+.logo h1{
+    margin:0;
+    font-size:30px;
+}
+
+.logo p{
+    margin:5px 0;
+    color:#666;
+}
+
+input, select{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border-radius:10px;
+    border:1px solid #ccc;
+    box-sizing:border-box;
+}
+
+button{
+    width:100%;
+    padding:12px;
+    border:none;
+    border-radius:10px;
+    margin-top:10px;
+    cursor:pointer;
+    font-size:16px;
+}
+
+.btn-calcular{
+    background:#ff7a00;
+    color:white;
+}
+
+.btn-confirmar{
+    background:#22c55e;
+    color:white;
+}
+
+.btn-instagram{
+    background:#E1306C;
+    color:white;
+}
+
+.resultado{
+    margin-top:15px;
+    background:#f5f5f5;
+    border-radius:10px;
+    padding:15px;
+    line-height:1.7;
+}
+
+.small{
+    margin-top:10px;
+    color:#666;
+    font-size:13px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="panel" id="panelPedido">
+
+<button class="toggle-panel"
+onclick="togglePanel()">☰</button>
+
+<div id="contenidoPanel">
+
+<div class="logo">
+<h1>🍔 Antumalen</h1>
+<p>Despachos Temuco</p>
+</div>
+
+<h3>Pedido</h3>
+
+<input id="nombre"
+type="text"
+placeholder="Nombre contacto">
+
+<input id="telefono"
+type="tel"
+placeholder="Teléfono contacto">
+
+<input id="cantidad"
+type="number"
+min="1"
+placeholder="Cantidad hamburguesas"
+oninput="actualizarPedido()">
+
+<input id="pedido"
+type="number"
+placeholder="Monto pedido"
+readonly>
+
+<select id="requiereDespacho"
+onchange="toggleDespacho()">
+
+<option value="si">
+Con despacho
+</option>
+
+<option value="no">
+Sin despacho
+</option>
+
+</select>
+
+<div id="direccionContainer">
+
+<input id="direccion"
+type="text"
+placeholder="Ej: Av Alemania 450">
+
+</div>
+
+<select id="metodoPago">
+
+<option value="Transferencia">
+Transferencia
+</option>
+
+<option value="Efectivo">
+Efectivo
+</option>
+
+</select>
+
+<button class="btn-calcular"
+onclick="buscarDireccion()">
+Calcular pedido 🍔
+</button>
+
+<button class="btn-confirmar"
+onclick="confirmarPedido()">
+Confirmar pedido 🍔
+</button>
+
+<div id="resultado"
+class="resultado">
+Esperando cálculo...
+</div>
+
+<a href="https://www.instagram.com/antumalen_temuco/"
+target="_blank">
+<button class="btn-instagram">
+Ver Instagram @antumalen_temuco
+</button>
+</a>
+
+<p class="small">
+Despacho calculado por kilómetros reales según calles.
+Tope máximo despacho: $2.000
+</p>
+
+</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+
+// =======================
+// CONFIG
+// =======================
+
+const centro = [-38.732919, -72.645887];
+
+const BASE_DESPACHO = 600;
+const COSTO_POR_KM = 250;
+const TOPE_DESPACHO = 2000;
+const VALOR_HAMBURGUESA = 5000;
+
+const GOOGLE_SCRIPT_URL =
+"https://script.google.com/macros/s/AKfycbxJhRMbcUhbMXb7usjaTYi-HntJgHiTWaSmEn3atERLilqqk6qPCZfIq4CbpEhP3OzI/exec";
+
+const mapa =
+L.map('map')
+.setView(centro, 12);
+
+L.tileLayer(
+'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+{
+maxZoom:19
+}).addTo(mapa);
+
+const burgerIcon = L.divIcon({
+html:"🍔",
+className:"burger-icon",
+iconSize:[40,40]
+});
+
+L.marker(
+centro,
+{icon:burgerIcon}
+)
+.addTo(mapa)
+.bindPopup(
+"🍔 Antumalen<br>Camino Botrolhue 1122"
+);
+
+let marcadorCliente;
+let rutaActual;
+let ultimoCalculo = null;
+let clienteLat = null;
+let clienteLon = null;
+
+// =======================
+// PANEL
+// =======================
+
+function togglePanel(){
+
+const panel =
+document.getElementById(
+'panelPedido'
+);
+
+const contenido =
+document.getElementById(
+'contenidoPanel'
+);
+
+panel.classList.toggle(
+'minimizado'
+);
+
+const mini =
+panel.classList.contains(
+'minimizado'
+);
+
+contenido.style.display =
+mini ? 'none' : 'block';
+}
+
+// =======================
+// PEDIDO
+// =======================
+
+function actualizarPedido(){
+
+const cantidad =
+parseInt(
+document.getElementById(
+'cantidad'
+).value
+) || 0;
+
+const total =
+cantidad *
+VALOR_HAMBURGUESA;
+
+document.getElementById(
+'pedido'
+).value =
+total;
+}
+
+function toggleDespacho(){
+
+const despacho =
+document.getElementById(
+'requiereDespacho'
+).value;
+
+document.getElementById(
+'direccionContainer'
+).style.display =
+despacho === "si"
+? "block"
+: "none";
+}
+
+// =======================
+// CALCULAR
+// =======================
+
+async function buscarDireccion(){
+
+const nombre =
+document.getElementById(
+'nombre'
+).value.trim();
+
+const telefono =
+document.getElementById(
+'telefono'
+).value.trim();
+
+if(!nombre){
+alert("Ingrese nombre");
+return;
+}
+
+if(!telefono){
+alert("Ingrese teléfono");
+return;
+}
+
+const despacho =
+document.getElementById(
+'requiereDespacho'
+).value;
+
+const pedido =
+parseFloat(
+document.getElementById(
+'pedido'
+).value
+);
+
+if(!pedido || pedido <= 0){
+alert("Ingrese hamburguesas");
+return;
+}
+
+if(despacho === "no"){
+
+ultimoCalculo = {
+
+direccion:
+"Sin despacho",
+
+pedido,
+
+km:0,
+
+despacho:0,
+
+total:pedido,
+
+tiempoEntrega:20
+};
+
+document.getElementById(
+'resultado'
+).innerHTML = `
+
+<b>🍔 Pedido:</b>
+$${pedido}<br>
+
+<b>🚶 Modalidad:</b>
+Sin despacho<br>
+
+<b>💳 Pago:</b>
+${document.getElementById(
+'metodoPago'
+).value}<br>
+
+<b>💰 Total:</b>
+$${pedido}<br>
+
+<b>⏱ Entrega:</b>
+20 min aprox
+`;
+
+return;
+}
+
+const direccion =
+document.getElementById(
+'direccion'
+).value.trim();
+
+if(!direccion){
+alert("Ingrese dirección");
+return;
+}
+
+const geoUrl =
+`https://nominatim.openstreetmap.org/search?format=json&q=${direccion}, Temuco, Chile`;
+
+const geoResponse =
+await fetch(geoUrl);
+
+const geoData =
+await geoResponse.json();
+
+if(geoData.length===0){
+alert(
+"Dirección no encontrada"
+);
+return;
+}
+
+const lat =
+parseFloat(
+geoData[0].lat
+);
+
+const lon =
+parseFloat(
+geoData[0].lon
+);
+
+clienteLat = lat;
+clienteLon = lon;
+
+if(rutaActual)
+mapa.removeLayer(
+rutaActual
+);
+
+if(marcadorCliente)
+mapa.removeLayer(
+marcadorCliente
+);
+
+marcadorCliente =
+L.marker([lat,lon])
+.addTo(mapa)
+.bindPopup(direccion)
+.openPopup();
+
+const routeUrl =
+`https://router.project-osrm.org/route/v1/driving/${centro[1]},${centro[0]};${lon},${lat}?overview=full&geometries=geojson`;
+
+const routeResponse =
+await fetch(routeUrl);
+
+const routeData =
+await routeResponse.json();
+
+const route =
+routeData.routes[0];
+
+const km =
+route.distance / 1000;
+
+const tiempo =
+Math.round(
+route.duration / 60
+);
+
+const coords =
+route.geometry.coordinates
+.map(c=>[
+c[1],
+c[0]
+]);
+
+rutaActual =
+L.polyline(
+coords,
+{weight:6}
+).addTo(mapa);
+
+mapa.fitBounds(
+rutaActual.getBounds()
+);
+
+const costoRuta =
+BASE_DESPACHO +
+(km * COSTO_POR_KM);
+
+const despachoCosto =
+Math.min(
+costoRuta,
+TOPE_DESPACHO
+);
+
+const total =
+pedido +
+despachoCosto;
+
+const tiempoEntrega =
+tiempo + 15;
+
+ultimoCalculo = {
+
+direccion,
+pedido,
+km,
+despacho:
+despachoCosto,
+total,
+tiempoEntrega
+};
+
+document.getElementById(
+'resultado'
+).innerHTML = `
+
+<b>📍 Dirección:</b>
+${direccion}<br><br>
+
+<b>🛣 Km:</b>
+${km.toFixed(2)}<br>
+
+<b>🚗 Tiempo:</b>
+${tiempo} min<br>
+
+<b>💸 Despacho:</b>
+$${Math.round(
+despachoCosto
+)}<br>
+
+<b>💰 Total:</b>
+$${Math.round(
+total
+)}<br>
+
+<b>💳 Pago:</b>
+${document.getElementById(
+'metodoPago'
+).value}<br>
+
+<b>⏱ Entrega:</b>
+${tiempoEntrega} min
+`;
+}
+
+// =======================
+// CONFIRMAR
+// =======================
+
+async function confirmarPedido(){
+
+    if(!ultimoCalculo){
+        alert("Primero calcula el pedido");
+        return;
+    }
+
+    const nombre =
+        document.getElementById(
+            "nombre"
+        ).value.trim();
+
+    const telefono =
+        document.getElementById(
+            "telefono"
+        ).value.trim();
+
+    const cantidad =
+        document.getElementById(
+            "cantidad"
+        ).value;
+
+    const metodoPago =
+        document.getElementById(
+            "metodoPago"
+        ).value;
+
+    const requiereDespacho =
+        document.getElementById(
+            "requiereDespacho"
+        ).value;
+
+    // 👇 CAMBIAR POR TU NÚMERO
+    // Formato Chile: 56975481615
+    const numeroWhatsapp =
+        "56975481615";
+
+    // ======================
+    // GUARDAR EN GOOGLE SHEETS
+    // ======================
+
+    const datos =
+        new FormData();
+
+    datos.append(
+        "fecha",
+        new Date()
+        .toLocaleString("es-CL")
+    );
+
+    datos.append(
+        "nombre",
+        nombre
+    );
+
+    datos.append(
+        "telefono",
+        telefono
+    );
+
+    datos.append(
+        "cantidadHamburguesas",
+        cantidad
+    );
+
+    datos.append(
+        "metodoPago",
+        metodoPago
+    );
+
+    datos.append(
+        "requiereDespacho",
+        requiereDespacho
+    );
+
+    datos.append(
+        "direccion",
+        ultimoCalculo.direccion
+    );
+
+    datos.append(
+        "pedido",
+        ultimoCalculo.pedido
+    );
+
+    datos.append(
+        "km",
+        ultimoCalculo.km
+    );
+
+    datos.append(
+        "despacho",
+        ultimoCalculo.despacho
+    );
+
+    datos.append(
+        "total",
+        ultimoCalculo.total
+    );
+
+    datos.append(
+        "tiempoEntrega",
+        ultimoCalculo.tiempoEntrega
+    );
+
+    try {
+
+        // guardar pedido
+        await fetch(
+            GOOGLE_SCRIPT_URL,
+            {
+                method:"POST",
+                body:datos
+            }
+        );
+
+        // ======================
+        // GOOGLE MAPS (solo despacho)
+        // ======================
+
+        let rutaTexto = "";
+
+        if(
+            requiereDespacho === "si"
+            &&
+            clienteLat
+            &&
+            clienteLon
+        ){
+
+            const mapsUrl =
+`https://www.google.com/maps/dir/?api=1&destination=${clienteLat},${clienteLon}&travelmode=driving`;
+
+            rutaTexto =
+`\n🗺 Ruta Google Maps:
+${mapsUrl}`;
+        }
+
+        // ======================
+        // MENSAJE WHATSAPP
+        // ======================
+
+const mensaje =
+`*NUEVO PEDIDO ANTUMALEN*
+
+Nombre: ${nombre}
+
+Telefono: ${telefono}
+
+Hamburguesas: ${cantidad}
+
+Despacho: ${
+requiereDespacho === "si"
+? "SI"
+: "NO"
+}
+
+Direccion:
+${ultimoCalculo.direccion}
+
+Pago:
+${metodoPago}
+
+Pedido:
+$${Math.round(
+ultimoCalculo.pedido
+)}
+
+Costo despacho:
+$${Math.round(
+ultimoCalculo.despacho
+)}
+
+Total:
+$${Math.round(
+ultimoCalculo.total
+)}
+
+Tiempo entrega:
+${ultimoCalculo.tiempoEntrega} min
+${rutaTexto}`;
+
+        // ======================
+        // ABRIR WHATSAPP APP
+        // ======================
+
+        const whatsappUrl =
+`https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(mensaje)}`;
+
+        window.open(
+            whatsappUrl,
+            "_blank"
+        );
+
+        alert(
+            "Pedido confirmado 🍔"
+        );
+
+    } catch(error){
+
+        console.error(
+            error
+        );
+
+        alert(
+            "Error enviando pedido"
+        );
+    }
+}
+toggleDespacho();
+
+</script>
+
+<iframe
+name="hiddenFrame"
+style="display:none;">
+</iframe>
+
+</body>
+</html>
